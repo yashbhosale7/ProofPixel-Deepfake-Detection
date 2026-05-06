@@ -1,5 +1,55 @@
-/data
-/notebooks
-/checkpoints
-/.venv
-/deepfake-env
+.gradio/
+*.pem
+.DS_Store# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+deepfake-env/
+
+# Environment variables
+.env
+*.env
+kaggle.json
+
+# Datasets
+data/
+data_videos/
+datasets/
+raw/
+processed/
+
+# Model checkpoints
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.h5
+
+# Outputs and logs
+outputs/
+logs/
+runs/
+wandb/
+*.log
+preds.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MacOS
+.DS_Store
+
+# Zip files
+*.zip
+*.tar
+*.gz
+
+# Temp files
+temp.py
+

@@ -9,10 +9,11 @@ pandas
 numpy
 jupyterlab
 ipykernel
-
-
-
+opencv-python
+tqdm
+kaggle
 flask
-
+facenet-pytorch
+gradio
 
 

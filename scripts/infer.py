@@ -82,12 +82,18 @@ def _ela_score(img_pil: Image.Image, q: int = 90) -> float:
 # --------------- predict ----------------
 CLASSES = ["fake", "real"]
 
-def predict_one(model, tfm, device, path: Path):
-    img = Image.open(path).convert("RGB")
+def predict_one(model, tfm, device, path):
+    if isinstance(path, (str, Path)):
+        img = Image.open(path).convert("RGB")
+    else:
+        # Assume it's a PIL Image (from video crop)
+        img = path.convert("RGB")
+        path = "in-memory-frame"
+
     # network prob
     x = tfm(img).unsqueeze(0).to(device)
     with torch.no_grad():
-        probs = torch.softmax(model(x), dim=1)[0].cpu()
+        probs = torch.softmax(model(x), dim=1)[0].cpu() #activation function
     p_fake = float(probs[0].item())
     p_real = float(probs[1].item())
     # Use model output directly for label
@@ -105,6 +111,64 @@ def predict_one(model, tfm, device, path: Path):
         "ela": float(ela),
         "fft_ratio": float(fft)
     }
+
+# --------------- video ------------------
+from video_utils import FrameExtractor, FaceDetector
+
+def predict_video(model, tfm, device, video_path: Path):
+    """
+    Predicts if a video is Real or Fake by aggregating frame predictions.
+    """
+    frame_ext = FrameExtractor(video_path, sample_rate=15) # Check every 15th frame
+    detector = FaceDetector(device)
+    
+    results = []
+    frames_processed = 0
+    faces_found = 0
+    
+    for frame in frame_ext:
+        frames_processed += 1
+        face = detector.crop_face(frame)
+        if face:
+            faces_found += 1
+            # reuse predict_one logic, but pass PIL image directly
+            res = predict_one(model, tfm, device, face) # predict_one now handles PIL
+            results.append(res)
+    
+    if not results:
+        return {
+            "file": str(video_path),
+            "label": "unknown",
+            "confidence": 0.0,
+            "p_real": 0.0,
+            "p_fake": 0.0,
+            "details": f"Processed {frames_processed} frames using interval 15, found 0 faces."
+        }
+    
+    # Aggregate
+    # Simple average of probabilities
+    avg_p_real = np.mean([r['p_real'] for r in results])
+    avg_p_fake = np.mean([r['p_fake'] for r in results])
+    
+    # Vote
+    fake_votes = sum(1 for r in results if r['label'] == 'fake' or r['label'] == 'suspect_fake')
+    real_votes = len(results) - fake_votes
+    
+    final_label = "real" if avg_p_real > avg_p_fake else "FAKE"
+    final_conf = avg_p_real if final_label == "real" else avg_p_fake
+    
+    return {
+        "file": str(video_path),
+        "label": final_label,
+        "confidence": float(final_conf),
+        "p_real": float(avg_p_real),
+        "p_fake": float(avg_p_fake),
+        "frames_processed": frames_processed,
+        "faces_found": faces_found,
+        "fake_frames": fake_votes,
+        "real_frames": real_votes
+    }
+
 
 # --------------- main -------------------
 def main(args):

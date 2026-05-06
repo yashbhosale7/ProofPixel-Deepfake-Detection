@@ -6,7 +6,7 @@ import shutil
 import traceback
 
 # Import prediction helper from infer.py
-from infer import build_transform, build_model, get_device, predict_one, pick_checkpoint
+from infer import build_transform, build_model, get_device, predict_one, predict_video, pick_checkpoint
 
 app = Flask(__name__)
 
@@ -122,8 +122,8 @@ HTML_PAGE = """
                   <div class="row gy-2">
                     <div class="col-6"><small>p_real</small><div id="pReal" class="fs-5 fw-bold">—</div></div>
                     <div class="col-6"><small>p_fake</small><div id="pFake" class="fs-5 fw-bold">—</div></div>
-                    <div class="col-6"><small>ELA</small><div id="ela" class="fs-6">—</div></div>
-                    <div class="col-6"><small>FFT ratio</small><div id="fft" class="fs-6">—</div></div>
+                    <div id="m1" class="col-6"><small>ELA</small><div class="fs-6">—</div></div>
+                    <div id="m2" class="col-6"><small>FFT ratio</small><div class="fs-6">—</div></div>
                   </div>
                 </div>
               </div>
@@ -149,8 +149,8 @@ HTML_PAGE = """
     const confPct = document.getElementById('confPct');
     const pReal = document.getElementById('pReal');
     const pFake = document.getElementById('pFake');
-    const ela = document.getElementById('ela');
-    const fft = document.getElementById('fft');
+    const m1 = document.getElementById('m1');
+    const m2 = document.getElementById('m2');
 
     // click -> open file dialog
     dz.addEventListener('click', ()=> fileInput.click());
@@ -185,8 +185,8 @@ HTML_PAGE = """
       confPct.textContent = '0%';
       pReal.textContent = '—';
       pFake.textContent = '—';
-      ela.textContent = '—';
-      fft.textContent = '—';
+      m1.innerHTML = '<small>ELA</small><div class="fs-6">—</div>';
+      m2.innerHTML = '<small>FFT ratio</small><div class="fs-6">—</div>';
     }
 
     clearBtn.addEventListener('click', (e)=>{ e.preventDefault(); resetUI(); });
@@ -195,7 +195,7 @@ HTML_PAGE = """
       e.preventDefault();
       feedback.innerHTML = '';
       if (!fileInput.files || fileInput.files.length === 0){
-        feedback.innerHTML = '<div class="alert alert-warning">Please select an image first.</div>';
+        feedback.innerHTML = '<div class="alert alert-warning">Please select a file first.</div>';
         return;
       }
       const file = fileInput.files[0];
@@ -204,32 +204,42 @@ HTML_PAGE = """
 
       analyzeBtn.disabled = true;
       analyzeBtn.innerText = 'Analyzing...';
-      feedback.innerHTML = '<div class="spinner-border text-light spinner-border-sm me-2"></div> Running model...';
+      feedback.innerHTML = '<div class="spinner-border text-light spinner-border-sm me-2"></div> Running analysis (this may take time for videos)...';
 
       try{
         const res = await fetch('/api/predict', { method:'POST', body: form });
         const data = await res.json();
         if(!res.ok){ throw new Error(data.error || res.statusText); }
 
-        // numbers
+        // General metrics
         const conf = Number(data.confidence || 0);
         const preal = Number(data.p_real || 0);
         const pfake = Number(data.p_fake || 0);
-
-        // badge
         const label = String(data.label || '').toUpperCase();
+
+        // Update badges
         resultBadge.textContent = label;
+        resultBadge.className = 'result-badge'; // reset
         if(label.includes('FAKE')){
           resultBadge.classList.add('badge-fake');
         } else {
           resultBadge.classList.add('badge-real');
         }
         confPct.textContent = (conf*100).toFixed(2) + '%';
-
+        
         pReal.textContent = preal.toFixed(3);
         pFake.textContent = pfake.toFixed(3);
-        ela.textContent   = Number(data.ela || 0).toFixed(3);
-        fft.textContent   = Number(data.fft_ratio || 0).toFixed(3);
+
+        // Video specific or Image specific?
+        if (data.frames_processed) {
+            // It's a video
+            m1.innerHTML = `<small>Frames</small><div class="fs-6">${data.frames_processed}</div>`;
+            m2.innerHTML = `<small>Fake Ratio</small><div class="fs-6">${data.fake_frames}/${data.faces_found}</div>`;
+        } else {
+            // It's an image
+            m1.innerHTML = `<small>ELA</small><div class="fs-6">${Number(data.ela||0).toFixed(3)}</div>`;
+            m2.innerHTML = `<small>FFT ratio</small><div class="fs-6">${Number(data.fft_ratio||0).toFixed(3)}</div>`;
+        }
 
         resultWrap.style.display = 'block';
         feedback.innerHTML = '';
@@ -237,7 +247,7 @@ HTML_PAGE = """
         feedback.innerHTML = '<div class="alert alert-danger">Error: '+ err.message +'</div>';
       }finally{
         analyzeBtn.disabled = false;
-        analyzeBtn.innerText = 'Analyze Image';
+        analyzeBtn.innerText = 'Analyze';
       }
     });
   </script>
@@ -308,9 +318,17 @@ def api_predict():
     try:
         tmp_path = Path(tmp_dir) / file.filename
         file.save(tmp_path)
+        
         if _MODEL is None:
             _MODEL, _TFM, _DEVICE = load_model()
-        res = predict_one(_MODEL, _TFM, _DEVICE, tmp_path)
+            
+        # Check extension
+        ext = tmp_path.suffix.lower()
+        if ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
+            res = predict_video(_MODEL, _TFM, _DEVICE, tmp_path)
+        else:
+            res = predict_one(_MODEL, _TFM, _DEVICE, tmp_path)
+            
         # include filename so UI can preview — but don't expose full path
         res['file_name'] = file.filename
         return jsonify(res)

@@ -112,7 +112,7 @@ def train(args):
     model = build_model(args.model, num_classes=len(classes), pretrained=True).to(device)
     torch.set_float32_matmul_precision("high")
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05) #activation function
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
